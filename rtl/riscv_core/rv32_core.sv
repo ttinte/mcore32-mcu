@@ -13,16 +13,17 @@ module rv32_core (
     output logic [3:0]  mem_wstrb_o,
     input  logic [31:0] mem_rdata_i,
 
+    output exception_t  trap_o,
     output logic        trace_valid_o,
     output logic [31:0] trace_pc_o,
     output logic [31:0] trace_instr_o,
     output logic        trace_rf_we_o,
     output logic [4:0]  trace_rf_rd_o,
-    output logic [31:0] trace_rf_wdata_o,
-    output logic        illegal_instr_o
+    output logic [31:0] trace_rf_wdata_o
 );
 
     decode_ctrl_t ctrl;
+    exception_t   trap;
 
     logic [31:0] pc;
     logic [31:0] load_data;
@@ -31,6 +32,13 @@ module rv32_core (
     logic [31:0] imm_ext;
     logic [31:0] alu_result;
     alu_flags_t  alu_flags;
+
+    logic        csr_valid;
+    logic [31:0] csr_source;
+    logic [31:0] csr_rdata;
+    logic [31:0] csr_wdata;
+    logic [31:0] mtvec;
+    logic [31:0] mepc;
 
     logic [31:0] mem_addr;
     logic [31:0] operand_a;
@@ -43,23 +51,26 @@ module rv32_core (
     logic [31:0] rs1_data_q;
     logic [31:0] rs2_data_q;
     logic [31:0] alu_out_q;
+    logic [31:0] csr_rdata_q;
 
     always_ff @(posedge clk_i) begin
         if (!rst_ni) begin
-            old_pc_q      <= '0;
-            instr_q       <= '0;
-            load_data_q   <= '0;
-            rs1_data_q    <= '0;
-            rs2_data_q    <= '0;
-            alu_out_q     <= '0;
+            old_pc_q    <= '0;
+            instr_q     <= '0;
+            load_data_q <= '0;
+            rs1_data_q  <= '0;
+            rs2_data_q  <= '0;
+            alu_out_q   <= '0;
+            csr_rdata_q <= '0;
         end
         else begin
-            old_pc_q      <= ctrl.ir_we ? pc          : old_pc_q;
-            instr_q       <= ctrl.ir_we ? mem_rdata_i : instr_q;
-            load_data_q   <= load_data;
-            rs1_data_q    <= rs1_data;
-            rs2_data_q    <= rs2_data;
-            alu_out_q     <= ctrl.alu_out_we ? alu_result : alu_out_q;
+            old_pc_q    <= ctrl.ir_we ? pc          : old_pc_q;
+            instr_q     <= ctrl.ir_we ? mem_rdata_i : instr_q;
+            load_data_q <= load_data;
+            rs1_data_q  <= rs1_data;
+            rs2_data_q  <= rs2_data;
+            alu_out_q   <= ctrl.alu_out_we ? alu_result : alu_out_q;
+            csr_rdata_q <= csr_rdata;
         end
     end
 
@@ -83,6 +94,8 @@ module rv32_core (
 
         if (ctrl.result_sel == RESULT_LOAD_DATA_Q) begin
             result = load_data_q;
+        end else if (ctrl.result_sel == RESULT_CSR_Q) begin
+            result = csr_rdata_q;            
         end
 
         if (ctrl.mem_addr_sel == MEM_ADDR_RESULT) begin
@@ -93,22 +106,29 @@ module rv32_core (
     control_unit u_control_unit (
         .clk_i              (clk_i),
         .rst_ni             (rst_ni),
-        .flags_i            (alu_flags),
         .instr_i            (instr_q),
+        .flags_i            (alu_flags),
         .ctrl_o             (ctrl),
         .mem_valid_o        (mem_valid_o),
         .mem_ready_i        (mem_ready_i),
         .mem_error_i        (mem_error_i),
-        .alu_result_i       (alu_out_q[1:0]),
-        .trace_valid_o      (trace_valid_o),
-        .illegal_instr_o    (illegal_instr_o)
+        .fetch_pc_i         (pc),
+        .instr_pc_i         (old_pc_q),
+        .alu_result_i       (alu_out_q),
+        .csr_valid_i        (csr_valid),
+        .trap_o             (trap),
+        .trace_valid_o      (trace_valid_o)
     );
 
     pc u_pc (
         .clk_i              (clk_i),
         .rst_ni             (rst_ni),
-        .pc_we              (ctrl.pc_we),
-        .next_pc            (result),
+        .trap_enter_i       (trap.valid),
+        .mtvec_i            (mtvec),
+        .mret_i             (ctrl.mret),
+        .mepc_i             (mepc),
+        .pc_we_i            (ctrl.pc_we),
+        .next_pc_i          (result),
         .pc_o               (pc)
     );
 
@@ -152,6 +172,33 @@ module rv32_core (
         .alu_flags_o        (alu_flags)
     );
 
+    always_comb begin
+        csr_source = instr_q[14] ? {27'd0, instr_q[19:15]} : rs1_data_q;
+        csr_wdata  = csr_source;
+
+        if (ctrl.csr_op == CSR_RS) begin
+            csr_wdata = csr_rdata_q | csr_source;
+        end else if (ctrl.csr_op == CSR_RC) begin
+            csr_wdata = csr_rdata_q & ~csr_source;
+        end
+    end
+
+    csrfile u_csrfile (
+        .clk_i              (clk_i),
+        .rst_ni             (rst_ni),
+        .valid_o            (csr_valid),
+        .addr_i             (instr_q[31:20]),
+        .write_i            (ctrl.csr_we),
+        .wdata_i            (csr_wdata),
+        .rdata_o            (csr_rdata),
+        .trap_enter_i       (trap.valid),
+        .trap_i             (trap),
+        .mret_i             (ctrl.mret),
+        .mtvec_o            (mtvec),
+        .mepc_o             (mepc)
+    );
+
+    assign trap_o           = trap;
     assign trace_pc_o       = old_pc_q;
     assign trace_instr_o    = instr_q;
     assign trace_rf_we_o    = ctrl.reg_we && (instr_q[11:7] != 5'd0);

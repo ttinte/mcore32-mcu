@@ -4,10 +4,11 @@
 //
 //  Description:
 //     Multicycle control FSM for the RV32 core.
-//     Instruction fetch requires at least one-cycle response latency;
-//     zero-wait fetch completion is not supported.
-//     Load/store requests wait for ready.
-//     Illegal instructions, bus errors and misaligned accesses halt the core.
+//     Instruction fetch requires at least one-cycle response latency.
+//     Memory errors are sampled only when memory ready is asserted.
+//     trap_o.valid is a one-cycle pulse during trap entry.
+//     Faulting instructions do not write GPRs or retire.
+//     Supports CSR instructions and MRET; interrupts are not supported.
 //
 //-----------------------------------------------------------------------------
 import rv32_pkg::*;
@@ -23,10 +24,13 @@ module control_unit (
     input  logic         mem_ready_i,
     input  logic         mem_error_i,
 
-    input  logic [1:0]   alu_result_i,
+    input  logic [31:0]  fetch_pc_i,
+    input  logic [31:0]  instr_pc_i,
+    input  logic [31:0]  alu_result_i,
 
-    output logic         trace_valid_o,
-    output logic         illegal_instr_o
+    input  logic         csr_valid_i,
+    output exception_t   trap_o,
+    output logic         trace_valid_o
 );
 
     localparam logic [2:0] FUNCT3_ADD_SUB   = 3'b000;     //OP
@@ -64,6 +68,13 @@ module control_unit (
     localparam logic [2:0] FUNCT3_BLTU      = 3'b110;
     localparam logic [2:0] FUNCT3_BGEU      = 3'b111;
 
+    localparam logic [2:0] FUNCT3_CSRRW     = 3'b001;     //CSR
+    localparam logic [2:0] FUNCT3_CSRRS     = 3'b010;
+    localparam logic [2:0] FUNCT3_CSRRC     = 3'b011;
+    localparam logic [2:0] FUNCT3_CSRRWI    = 3'b101;
+    localparam logic [2:0] FUNCT3_CSRRSI    = 3'b110;
+    localparam logic [2:0] FUNCT3_CSRRCI    = 3'b111;
+
     typedef enum logic [3:0] {
         ST_IF_REQ,
         ST_IF_RESP,
@@ -73,6 +84,9 @@ module control_unit (
         ST_LD,
         ST_ST,
         ST_WB,
+        ST_TRAP,
+        ST_CSR,
+        ST_MRET,
         ST_ILLEGAL
     } state_e;
 
@@ -81,10 +95,16 @@ module control_unit (
     logic [2:0] funct3;
     logic [6:0] funct7;
 
-    logic take_branch;
+    logic        take_branch;
+    logic [31:0] branch_target;
+
+    logic fetch_fault;
     logic illegal_instr;
     logic addr_misaligned;
     logic data_misaligned;
+    logic load_fault;
+    logic store_fault;
+    exception_t exc_d;
 
     logic is_op;
     logic is_op_imm;
@@ -95,6 +115,8 @@ module control_unit (
     logic is_lui;
     logic is_jalr;
     logic is_jal;
+    logic is_csr;
+    logic is_mret;
 
     assign opcode = instr_i[6:0];
     assign funct3 = instr_i[14:12];
@@ -109,12 +131,14 @@ module control_unit (
     assign is_lui    = (opcode == OPCODE_LUI);
     assign is_jalr   = (opcode == OPCODE_JALR);
     assign is_jal    = (opcode == OPCODE_JAL);
+    assign is_csr    = (opcode == OPCODE_CSR) && (funct3[1:0] != 2'b00);
+    assign is_mret   = (instr_i == 32'h3020_0073);
 
     // Main control fsm
     always_comb begin
         state_d             = state_q;
-        illegal_instr_o     = 1'b0;
         mem_valid_o         = 1'b0;
+        ctrl_o.mret         = 1'b0;
         ctrl_o.pc_we        = 1'b0;
         ctrl_o.pc_clear_lsb = 1'b0;
         ctrl_o.mem_addr_sel = MEM_ADDR_PC;
@@ -128,6 +152,8 @@ module control_unit (
         ctrl_o.op_b_sel     = OP_B_FOUR;
         ctrl_o.alu_op       = ALU_ADD;
         ctrl_o.alu_out_we   = 1'b0;
+        ctrl_o.csr_we       = 1'b0;
+        ctrl_o.csr_op       = CSR_RW;
         ctrl_o.result_sel   = RESULT_ALU_OUT_Q;
 
         unique case (state_q)
@@ -139,18 +165,13 @@ module control_unit (
             end
 
             ST_IF_RESP: begin
+                state_d = ST_IF_RESP;
+
                 mem_valid_o = 1'b1;
-
                 if (mem_ready_i) begin
-                    state_d = mem_error_i ? ST_ILLEGAL : ST_ID;
-
-                    if (!mem_error_i) begin
-                        state_d = ST_ID;
-                        ctrl_o.pc_we = 1'b1;
-                        ctrl_o.ir_we = 1'b1;
-                    end
-                end else begin
-                    state_d = ST_IF_RESP;
+                    state_d = ST_ID;
+                    ctrl_o.pc_we = 1'b1;
+                    ctrl_o.ir_we = 1'b1;
                 end
             end
 
@@ -191,6 +212,12 @@ module control_unit (
                     ctrl_o.op_a_sel   = OP_A_OLD_PC;
                     ctrl_o.op_b_sel   = OP_B_IMM;
                     ctrl_o.alu_out_we = 1'b1;
+                end
+
+                if (is_csr) begin
+                    state_d = ST_CSR;
+                end else if (is_mret) begin
+                    state_d = ST_MRET;
                 end
             end
 
@@ -302,13 +329,9 @@ module control_unit (
             end
 
             ST_LD: begin
-                if (mem_ready_i) begin
-                    state_d = mem_error_i ? ST_ILLEGAL : ST_WB;
-                end else begin
-                    state_d = ST_LD;
-                end
+                state_d = mem_ready_i ? ST_WB : ST_LD;
 
-                mem_valid_o         = 1'b1;
+                mem_valid_o = 1'b1;
                 ctrl_o.mem_addr_sel = MEM_ADDR_RESULT;
 
                 unique case (funct3)
@@ -322,15 +345,11 @@ module control_unit (
             end
 
             ST_ST: begin
-                if (mem_ready_i) begin
-                    state_d = mem_error_i ? ST_ILLEGAL : ST_IF_REQ;
-                end else begin
-                    state_d = ST_ST;
-                end
+                state_d = mem_ready_i ? ST_IF_REQ : ST_ST;
 
-                mem_valid_o         = 1'b1;
+                mem_valid_o = 1'b1;
                 ctrl_o.mem_addr_sel = MEM_ADDR_RESULT;
-                ctrl_o.mem_we       = 1'b1;
+                ctrl_o.mem_we = 1'b1;
 
                 unique case(funct3)
                     FUNCT3_SB: ctrl_o.store_op = STORE_BYTE;
@@ -344,12 +363,39 @@ module control_unit (
                 state_d = ST_IF_REQ;
 
                 ctrl_o.reg_we = 1'b1;
-                if (is_load) ctrl_o.result_sel = RESULT_LOAD_DATA_Q;
+                if (is_load) begin
+                    ctrl_o.result_sel = RESULT_LOAD_DATA_Q;
+                end else if (is_csr) begin
+                    ctrl_o.result_sel = RESULT_CSR_Q;
+                end
+            end
+
+            ST_TRAP: begin
+                state_d = ST_IF_REQ;
+            end
+
+            ST_CSR: begin
+                state_d = ST_WB;
+
+                ctrl_o.csr_we = (funct3[1:0] == CSR_RW) || (instr_i[19:15] != 5'd0);
+                unique case (funct3)
+                    FUNCT3_CSRRW,
+                    FUNCT3_CSRRWI: ctrl_o.csr_op = CSR_RW;
+                    FUNCT3_CSRRS,
+                    FUNCT3_CSRRSI: ctrl_o.csr_op = CSR_RS;
+                    FUNCT3_CSRRC,
+                    FUNCT3_CSRRCI: ctrl_o.csr_op = CSR_RC;
+                    default: ;
+                endcase
+            end
+
+            ST_MRET: begin
+                state_d = ST_IF_REQ;
+                ctrl_o.mret = 1'b1;
             end
 
             ST_ILLEGAL: begin
                 state_d = ST_ILLEGAL;
-                illegal_instr_o = 1'b1;
             end
 
             default: begin
@@ -357,9 +403,11 @@ module control_unit (
             end
         endcase
 
-        if (illegal_instr || data_misaligned || addr_misaligned) begin
-            state_d = ST_ILLEGAL;
+        if (exc_d.valid) begin
+            state_d = ST_TRAP;
             ctrl_o.pc_we  = 1'b0;
+            ctrl_o.ir_we  = 1'b0;
+            ctrl_o.reg_we = 1'b0;
             mem_valid_o   = 1'b0;
             ctrl_o.mem_we = 1'b0;
         end
@@ -385,91 +433,110 @@ module control_unit (
     always_ff @(posedge clk_i) begin
         if (!rst_ni) begin
             state_q <= ST_IF_REQ;
+            trap_o  <= '0;
         end else begin
             state_q <= state_d;
+            trap_o  <= exc_d;
         end
     end
 
     // Instruction legality check
     always_comb begin
-        illegal_instr = (state_q == ST_ID);
-
-        if (is_op) begin
-            unique case({funct7, funct3})
-                {7'h00, FUNCT3_ADD_SUB},
-                {7'h20, FUNCT3_ADD_SUB},
-                {7'h00, FUNCT3_SLL},
-                {7'h00, FUNCT3_SLT},
-                {7'h00, FUNCT3_SLTU},
-                {7'h00, FUNCT3_XOR},
-                {7'h00, FUNCT3_SRL_SRA},
-                {7'h20, FUNCT3_SRL_SRA},
-                {7'h00, FUNCT3_OR},
-                {7'h00, FUNCT3_AND}: illegal_instr = 1'b0;
-                default: ;
-            endcase
-        end
-
-        if (is_op_imm) begin
-            unique case(funct3)
-                FUNCT3_ADDI,
-                FUNCT3_SLTI,
-                FUNCT3_SLTIU,
-                FUNCT3_XORI,
-                FUNCT3_ORI,
-                FUNCT3_ANDI:      illegal_instr = 1'b0;
-                FUNCT3_SLLI:      illegal_instr = (funct7 != 7'h00);
-                FUNCT3_SRLI_SRAI: illegal_instr = (funct7 != 7'h00) && (funct7 != 7'h20);
-                default: ;
-            endcase
-        end
-
-        if (is_load) begin
-            unique case (funct3)
-                FUNCT3_LB,
-                FUNCT3_LH,
-                FUNCT3_LW,
-                FUNCT3_LBU,
-                FUNCT3_LHU: illegal_instr = 1'b0;
-                default: ;
-            endcase
-        end
-
-        if (is_store) begin
-            unique case(funct3)
-                FUNCT3_SB,
-                FUNCT3_SH,
-                FUNCT3_SW: illegal_instr = 1'b0;
-                default: ;
-            endcase
-        end
-
-        if (is_branch) begin
-            unique case (funct3)
-                FUNCT3_BEQ,
-                FUNCT3_BNE,
-                FUNCT3_BLT,
-                FUNCT3_BGE,
-                FUNCT3_BLTU,
-                FUNCT3_BGEU: illegal_instr = 1'b0;
-                default: ;
-            endcase
-        end
-
-        if (is_auipc || is_lui || is_jal) begin
-            illegal_instr = 1'b0;
-        end
-
-        if (is_jalr && (funct3 == FUNCT3_JALR)) begin
-            illegal_instr = 1'b0;
-        end
-    end
-
-    // Instruction and data address alignment checks
-    always_comb begin
+        fetch_fault     = (state_q == ST_IF_RESP) && mem_ready_i && mem_error_i;
+        illegal_instr   = (state_q == ST_ID);
         addr_misaligned = 1'b0;
         data_misaligned = 1'b0;
+        load_fault      = (state_q == ST_LD) && mem_ready_i && mem_error_i;
+        store_fault     = (state_q == ST_ST) && mem_ready_i && mem_error_i;
 
+        if (state_q == ST_ID) begin
+            if (is_op) begin
+                unique case({funct7, funct3})
+                    {7'h00, FUNCT3_ADD_SUB},
+                    {7'h20, FUNCT3_ADD_SUB},
+                    {7'h00, FUNCT3_SLL},
+                    {7'h00, FUNCT3_SLT},
+                    {7'h00, FUNCT3_SLTU},
+                    {7'h00, FUNCT3_XOR},
+                    {7'h00, FUNCT3_SRL_SRA},
+                    {7'h20, FUNCT3_SRL_SRA},
+                    {7'h00, FUNCT3_OR},
+                    {7'h00, FUNCT3_AND}: illegal_instr = 1'b0;
+                    default: ;
+                endcase
+            end
+
+            if (is_op_imm) begin
+                unique case(funct3)
+                    FUNCT3_ADDI,
+                    FUNCT3_SLTI,
+                    FUNCT3_SLTIU,
+                    FUNCT3_XORI,
+                    FUNCT3_ORI,
+                    FUNCT3_ANDI:      illegal_instr = 1'b0;
+                    FUNCT3_SLLI:      illegal_instr = (funct7 != 7'h00);
+                    FUNCT3_SRLI_SRAI: illegal_instr = (funct7 != 7'h00) && (funct7 != 7'h20);
+                    default: ;
+                endcase
+            end
+
+            if (is_load) begin
+                unique case (funct3)
+                    FUNCT3_LB,
+                    FUNCT3_LH,
+                    FUNCT3_LW,
+                    FUNCT3_LBU,
+                    FUNCT3_LHU: illegal_instr = 1'b0;
+                    default: ;
+                endcase
+            end
+
+            if (is_store) begin
+                unique case(funct3)
+                    FUNCT3_SB,
+                    FUNCT3_SH,
+                    FUNCT3_SW: illegal_instr = 1'b0;
+                    default: ;
+                endcase
+            end
+
+            if (is_branch) begin
+                unique case (funct3)
+                    FUNCT3_BEQ,
+                    FUNCT3_BNE,
+                    FUNCT3_BLT,
+                    FUNCT3_BGE,
+                    FUNCT3_BLTU,
+                    FUNCT3_BGEU: illegal_instr = 1'b0;
+                    default: ;
+                endcase
+            end
+
+            if (is_auipc || is_lui || is_jal) begin
+                illegal_instr = 1'b0;
+            end
+
+            if (is_jalr && (funct3 == FUNCT3_JALR)) begin
+                illegal_instr = 1'b0;
+            end
+
+            if (is_csr) begin
+                unique case (funct3)
+                    FUNCT3_CSRRW,
+                    FUNCT3_CSRRWI,
+                    FUNCT3_CSRRS,
+                    FUNCT3_CSRRSI,
+                    FUNCT3_CSRRC,
+                    FUNCT3_CSRRCI: illegal_instr = !csr_valid_i;
+                    default: ;
+                endcase
+            end
+
+            if (is_mret) begin
+                illegal_instr = 1'b0;
+            end
+        end
+        
         if ((state_q == ST_EX) && ((is_branch && take_branch) || is_jalr || is_jal)) begin
             addr_misaligned = is_jalr ? alu_result_i[1] : |alu_result_i[1:0];
         end
@@ -484,8 +551,26 @@ module control_unit (
         end
     end
 
+    assign branch_target = is_jalr ? {alu_result_i[31:1], 1'b0} : alu_result_i;
+
+    exception u_exception (
+        .fetch_fault_i      (fetch_fault),
+        .illegal_instr_i    (illegal_instr),
+        .addr_misaligned_i  (addr_misaligned),
+        .data_misaligned_i  (data_misaligned),
+        .load_fault_i       (load_fault),
+        .store_fault_i      (store_fault),
+        .is_load_i          (is_load),
+        .fetch_pc_i         (fetch_pc_i),
+        .instr_pc_i         (instr_pc_i),
+        .instr_i            (instr_i),
+        .branch_target_i    (branch_target),
+        .data_addr_i        (alu_result_i),
+        .exc_o              (exc_d)
+    );
+
     assign trace_valid_o = ((state_q == ST_ST) && mem_valid_o && mem_ready_i && !mem_error_i) ||
                            ((state_q == ST_EX) && is_branch && !(take_branch && addr_misaligned)) ||
-                           (state_q == ST_WB);
+                           (state_q == ST_WB || (state_q == ST_MRET));
 
 endmodule

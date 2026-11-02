@@ -9,7 +9,8 @@ package rv32_pkg;
         OPCODE_AUIPC  = 7'h17,
         OPCODE_LUI    = 7'h37,
         OPCODE_JALR   = 7'h67,
-        OPCODE_JAL    = 7'h6F
+        OPCODE_JAL    = 7'h6F,
+        OPCODE_CSR    = 7'h73
     } opcode_e;
 
     typedef enum logic {
@@ -75,12 +76,20 @@ package rv32_pkg;
         logic overflow;
     } alu_flags_t;
 
-    typedef enum logic {
+    typedef enum logic [1:0] {
         RESULT_ALU_OUT_Q,
-        RESULT_LOAD_DATA_Q
+        RESULT_LOAD_DATA_Q,
+        RESULT_CSR_Q
     } result_sel_e;
 
+    typedef enum logic [1:0] {
+        CSR_RW  = 2'b01,
+        CSR_RS  = 2'b10,
+        CSR_RC  = 2'b11
+    } csr_op_e;
+
     typedef struct packed {
+        logic           mret;
         logic           pc_we;
         logic           pc_clear_lsb;
         mem_addr_sel_e  mem_addr_sel;
@@ -94,7 +103,26 @@ package rv32_pkg;
         op_b_sel_e      op_b_sel;
         alu_op_e        alu_op;
         logic           alu_out_we;
+        logic           csr_we;
+        csr_op_e        csr_op;
         result_sel_e    result_sel;
     } decode_ctrl_t;
+
+    typedef enum logic [3:0] { 
+        INSTR_ADDR_MISALIGNED = 0,
+        INSTR_ACCESS_FAULT    = 1,
+        ILLEGAL_INSTR         = 2,
+        LOAD_ADDR_MISALIGNED  = 4,
+        LOAD_ACCESS_FAULT     = 5,
+        STORE_ADDR_MISALIGNED = 6,
+        STORE_ACCESS_FAULT    = 7
+    } exc_cause_e;
+
+    typedef struct packed {
+        logic        valid;
+        exc_cause_e  cause;
+        logic [31:0] epc;
+        logic [31:0] tval;
+    } exception_t;
 
 endpackage

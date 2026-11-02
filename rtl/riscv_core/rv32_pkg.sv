@@ -12,16 +12,6 @@ package rv32_pkg;
         OPCODE_JAL    = 7'h6F
     } opcode_e;
 
-    typedef enum logic [2:0] {
-        BRANCH_EQ   = 3'b000,
-        BRANCH_NE   = 3'b001,
-        BRANCH_LT   = 3'b100,
-        BRANCH_GE   = 3'b101,
-        BRANCH_LTU  = 3'b110,
-        BRANCH_GEU  = 3'b111,
-        BRANCH_NONE = 3'b010 
-    } branch_op_e;
-
     typedef enum logic {
         MEM_ADDR_PC,
         MEM_ADDR_RESULT

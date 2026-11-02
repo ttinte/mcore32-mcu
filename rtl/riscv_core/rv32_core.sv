@@ -23,9 +23,8 @@ module rv32_core (
 );
 
     decode_ctrl_t ctrl;
-    logic         take_branch;
-    branch_op_e   branch_op;
 
+    logic [31:0] pc;
     logic [31:0] load_data;
     logic [31:0] rs1_data;
     logic [31:0] rs2_data;
@@ -38,7 +37,6 @@ module rv32_core (
     logic [31:0] operand_b;
     logic [31:0] result;
 
-    logic [31:0] pc_q;
     logic [31:0] old_pc_q;
     logic [31:0] instr_q;
     logic [31:0] load_data_q;
@@ -48,7 +46,6 @@ module rv32_core (
 
     always_ff @(posedge clk_i) begin
         if (!rst_ni) begin
-            pc_q          <= '0;
             old_pc_q      <= '0;
             instr_q       <= '0;
             load_data_q   <= '0;
@@ -57,8 +54,7 @@ module rv32_core (
             alu_out_q     <= '0;
         end
         else begin
-            pc_q          <= ctrl.pc_we ? result      : pc_q;
-            old_pc_q      <= ctrl.ir_we ? pc_q        : old_pc_q;
+            old_pc_q      <= ctrl.ir_we ? pc          : old_pc_q;
             instr_q       <= ctrl.ir_we ? mem_rdata_i : instr_q;
             load_data_q   <= load_data;
             rs1_data_q    <= rs1_data;
@@ -68,8 +64,8 @@ module rv32_core (
     end
 
     always_comb begin
-        mem_addr  = pc_q;
-        operand_a = pc_q;
+        mem_addr  = pc;
+        operand_a = pc;
         operand_b = 32'd4;
         result    = ctrl.pc_clear_lsb ? {alu_out_q[31:1], 1'b0} : alu_out_q;
 
@@ -97,22 +93,23 @@ module rv32_core (
     control_unit u_control_unit (
         .clk_i              (clk_i),
         .rst_ni             (rst_ni),
+        .flags_i            (alu_flags),
         .instr_i            (instr_q),
         .ctrl_o             (ctrl),
         .mem_valid_o        (mem_valid_o),
         .mem_ready_i        (mem_ready_i),
         .mem_error_i        (mem_error_i),
-        .addr_lsb_i         (alu_out_q[1:0]),
-        .take_branch_i      (take_branch),
-        .branch_op_o        (branch_op),
+        .alu_result_i       (alu_out_q[1:0]),
         .trace_valid_o      (trace_valid_o),
         .illegal_instr_o    (illegal_instr_o)
     );
 
-    branch_unit u_branch_unit (
-        .branch_op_i        (branch_op),
-        .flags_i            (alu_flags),
-        .take_branch_o      (take_branch)
+    pc u_pc (
+        .clk_i              (clk_i),
+        .rst_ni             (rst_ni),
+        .pc_we              (ctrl.pc_we),
+        .next_pc            (result),
+        .pc_o               (pc)
     );
 
     assign mem_addr_o  = mem_addr;

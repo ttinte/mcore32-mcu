@@ -4,17 +4,24 @@ An educational softcore RISC-V microcontroller for FPGA, written in SystemVerilo
 
 ## Current features
 
-- Multi-cycle RV32I subset core with memory handshake, byte/halfword/word
-  load/store support, and halt-on-error handling for illegal instructions,
-  misaligned accesses and bus errors.
-- 32 KiB synchronous RAM with byte write enables and optional firmware
-  initialization, intended for FPGA block RAM inference.
-- APB master bridge and configurable interconnect with address decoding,
-  slave response multiplexing and errors for unmapped accesses.
+- Multicycle RV32I subset core with memory handshake and byte/halfword/word loads and stores.
+- Registered branch decisions and alignment-based memory request gating.
+- Machine-mode CSRs: `mstatus`, `mtvec`, `mepc`, `mcause`, `mtval`; six CSR instructions and `MRET`.
+- Synchronous exceptions for illegal instructions, misaligned addresses and access faults.
+- The CPU core does not support interrupts yet.
+- CPU trap-event and instruction-retirement debug outputs.
+- 32 KiB synchronous RAM with byte write enables and firmware initialization.
+- APB bridge/interconnect with address decoding and unmapped-access errors.
 - APB UART with 8N1 TX/RX, independent FIFOs and a polling C driver.
-  SoC defaults: 70 MHz clock, 115200 baud and FIFO depth of 32 bytes per direction.
+  SoC defaults: 70 MHz, 115200 baud and 32-byte FIFOs per direction.
 
-## Memory map
+## CPU datapath
+
+![Multicycle RV32 CPU datapath](docs/mcore_datapath.png)
+
+Main datapath; CSR and exception/trap logic omitted.
+
+## Memory map and UART
 
 | Region | Address range (inclusive) | Size |
 | --- | --- | --- |
@@ -22,21 +29,25 @@ An educational softcore RISC-V microcontroller for FPGA, written in SystemVerilo
 | APB window | `0x80000000`–`0x8000FFFF` | 64 KiB |
 | UART slot | `0x80000000`–`0x80000FFF` | 4 KiB |
 
-UART register offsets: TX `0x00`, RX `0x04`, STATUS `0x08`.
-STATUS bit 0 is TX-full; bit 1 is RX-empty.
 The APB window reserves address space, not physical RAM.
+
+| UART register | Offset | Access | Meaning |
+| --- | --- | --- | --- |
+| TX | `0x00` | Write | Transmit byte in bits `[7:0]` |
+| RX | `0x04` | Read | Receive byte in bits `[7:0]` |
+| STATUS | `0x08` | Read | Bit 0: TX full; bit 1: RX empty |
 
 ## Simulation
 
 Simulation is set up for Questa/ModelSim.
 
-## Firmware status
+## Firmware platform
 
-The repository currently includes the UART driver, SoC definitions, build rules
-and binary-to-memory-image converter. Startup code, the linker script,
-application sources and SoC/core simulation filelists are not included yet.
+Bare-metal startup, a 32 KiB RAM linker script with a 1 KiB stack, UART driver
+and machine-mode trap handling with optional `MRET` recovery.
 
 ## Acknowledgments
 
-* The UART RX hierarchy was inspired by the Xilinx XUP "FPGA Design Flow using Vivado" teaching material.
-* No Xilinx source files are redistributed in this repository. The RTL implementation was rewritten independently in SystemVerilog for educational use.
+The UART RX hierarchy was inspired by Xilinx XUP "FPGA Design Flow using Vivado"
+teaching material. No Xilinx source files are redistributed here; the UART RTL
+was rewritten independently in SystemVerilog for educational use.

@@ -68,15 +68,15 @@ module soc_top #(
         .mem_wdata_o        (bus_wdata),
         .mem_wstrb_o        (bus_wstrb),
         .mem_rdata_i        (bus_rdata),
+        .trap_o             (),
         .trace_valid_o      (),
         .trace_pc_o         (),
         .trace_instr_o      (),
         .trace_rf_we_o      (),
         .trace_rf_rd_o      (),
-        .trace_rf_wdata_o   (),
-        .illegal_instr_o    ()
+        .trace_rf_wdata_o   ()
     );
-    
+
     addr_decoder #(
         .DEPTH_WORDS        (MEM_DEPTH)
     ) u_addr_decoder (

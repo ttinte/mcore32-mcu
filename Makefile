@@ -19,7 +19,7 @@ FW_OBJDUMP := $(CROSS_COMPILE)objdump
 FW_SIZE    := $(CROSS_COMPILE)size
 
 # ===== FIRMWARE APPLICATION CONFIG =====
-APP ?= diagnostic
+APP ?= uart_trap
 
 FW_DIR            := firmware
 FW_SOURCE_ROOT    := $(FW_DIR)/src
@@ -36,22 +36,31 @@ FW_APP_MEM        := $(FW_BUILD_DIR)/firmware.mem
 FW_APP_HEX        := $(FW_BUILD_DIR)/firmware.hex
 FW_MEM            := $(FW_DIR)/firmware.mem
 FW_HEX            := $(FW_DIR)/firmware.hex
+FW_ROOT_MEM       := firmware.mem
 FW_APP_SOURCES    := $(wildcard $(FW_APP_DIR)/*.c)
+FW_APP_ASM_SOURCES := $(wildcard $(FW_APP_DIR)/*.S)
+FW_PLATFORM_C_SOURCES := $(wildcard $(FW_PLATFORM_DIR)/*.c)
+FW_PLATFORM_ASM_SOURCES := $(wildcard $(FW_PLATFORM_DIR)/*.S)
 FW_DRIVER_SOURCES := $(wildcard $(FW_DRIVER_DIR)/*/*.c)
-FW_APP_OBJECTS    := $(patsubst $(FW_APP_DIR)/%.c,$(FW_BUILD_DIR)/app/%.o,$(FW_APP_SOURCES))
+FW_APP_OBJECTS    := $(patsubst $(FW_APP_DIR)/%.c,$(FW_BUILD_DIR)/app/%.o,$(FW_APP_SOURCES)) \
+                     $(patsubst $(FW_APP_DIR)/%.S,$(FW_BUILD_DIR)/app/%.o,$(FW_APP_ASM_SOURCES))
+FW_PLATFORM_OBJECTS := $(patsubst $(FW_PLATFORM_DIR)/%.c,$(FW_BUILD_DIR)/platform/%.o,$(FW_PLATFORM_C_SOURCES)) \
+                       $(patsubst $(FW_PLATFORM_DIR)/%.S,$(FW_BUILD_DIR)/platform/%.o,$(FW_PLATFORM_ASM_SOURCES))
 FW_DRIVER_OBJECTS := $(patsubst $(FW_DRIVER_DIR)/%.c,$(FW_BUILD_DIR)/drivers/%.o,$(FW_DRIVER_SOURCES))
-FW_STARTUP_OBJECT := $(FW_BUILD_DIR)/startup.o
-FW_OBJECTS        := $(FW_STARTUP_OBJECT) $(FW_DRIVER_OBJECTS) $(FW_APP_OBJECTS)
-FW_DEPFILES       := $(FW_DRIVER_OBJECTS:.o=.d) $(FW_APP_OBJECTS:.o=.d)
+FW_OBJECTS        := $(FW_PLATFORM_OBJECTS) $(FW_DRIVER_OBJECTS) $(FW_APP_OBJECTS)
+FW_DEPFILES       := $(FW_OBJECTS:.o=.d)
 FW_APPS           := $(notdir $(patsubst %/,%,$(wildcard $(FW_SOURCE_ROOT)/*/)))
 
-FW_ARCH_FLAGS := -march=rv32i -mabi=ilp32
+FW_ARCH_FLAGS := -march=rv32i_zicsr -mabi=ilp32
+# Vitis multilib selection does not map rv32i_zicsr to rv32i/ilp32.
+# Integer software helpers are compatible; select that archive explicitly.
+FW_LIBGCC = $(shell $(FW_CC) -march=rv32i -mabi=ilp32 -print-libgcc-file-name)
 
 FW_CFLAGS     := $(FW_ARCH_FLAGS) -Os -g -Wall -Wextra \
                  -ffreestanding -fno-builtin -fno-stack-protector \
                  -ffunction-sections -fdata-sections -msmall-data-limit=0 \
                  -MMD -MP -I$(FW_DIR)/include -I$(FW_PLATFORM_DIR) -I$(FW_DRIVER_DIR)
-FW_ASFLAGS    := $(FW_ARCH_FLAGS) -g
+FW_ASFLAGS    := $(FW_ARCH_FLAGS) -g -MMD -MP -I$(FW_PLATFORM_DIR)
 FW_LDFLAGS    := $(FW_ARCH_FLAGS) -nostdlib -nostartfiles \
                  -Wl,-T,$(FW_PLATFORM_DIR)/linker.ld -Wl,--gc-sections \
                  -Wl,--build-id=none -Wl,-Map,$(FW_MAP)
@@ -107,12 +116,23 @@ fw-tools:
 $(FW_BUILD_DIR):
 	mkdir -p $@
 
-$(FW_STARTUP_OBJECT): $(FW_PLATFORM_DIR)/startup.S | $(FW_BUILD_DIR)
+$(FW_OBJECTS): Makefile
+
+$(FW_BUILD_DIR)/platform/%.o: $(FW_PLATFORM_DIR)/%.c
+	mkdir -p $(dir $@)
+	$(FW_CC) $(FW_CFLAGS) -c $< -o $@
+
+$(FW_BUILD_DIR)/platform/%.o: $(FW_PLATFORM_DIR)/%.S
+	mkdir -p $(dir $@)
 	$(FW_CC) $(FW_ASFLAGS) -c $< -o $@
 
 $(FW_BUILD_DIR)/app/%.o: $(FW_APP_DIR)/%.c
 	mkdir -p $(dir $@)
 	$(FW_CC) $(FW_CFLAGS) -c $< -o $@
+
+$(FW_BUILD_DIR)/app/%.o: $(FW_APP_DIR)/%.S
+	mkdir -p $(dir $@)
+	$(FW_CC) $(FW_ASFLAGS) -c $< -o $@
 
 $(FW_BUILD_DIR)/drivers/%.o: $(FW_DRIVER_DIR)/%.c
 	mkdir -p $(dir $@)
@@ -121,7 +141,7 @@ $(FW_BUILD_DIR)/drivers/%.o: $(FW_DRIVER_DIR)/%.c
 $(FW_ELF): $(FW_OBJECTS) $(FW_PLATFORM_DIR)/linker.ld
 	@test -n "$(FW_APP_SOURCES)" || \
 	    { echo "Unknown firmware app '$(APP)'"; echo "Available apps: $(FW_APPS)"; exit 1; }
-	$(FW_CC) $(FW_LDFLAGS) $(FW_OBJECTS) -lgcc -o $@
+	$(FW_CC) $(FW_LDFLAGS) $(FW_OBJECTS) "$(FW_LIBGCC)" -o $@
 	$(FW_SIZE) $@
 
 $(FW_BIN): $(FW_ELF)
@@ -138,16 +158,17 @@ $(FW_DUMP): $(FW_ELF)
 
 fw: fw-tools $(FW_APP_MEM) $(FW_APP_HEX) $(FW_DUMP)
 	cp $(FW_APP_MEM) $(FW_MEM)
+	cp $(FW_APP_MEM) $(FW_ROOT_MEM)
 	cp $(FW_APP_HEX) $(FW_HEX)
 	@echo "Selected firmware app: $(APP)"
-	@echo "Vivado image: $(FW_MEM)"
+	@echo "Vivado image: $(FW_ROOT_MEM)"
 
 fw-rebuild:
 	rm -rf $(FW_BUILD_DIR)
 	$(MAKE) fw APP=$(APP)
 
 fw-clean:
-	rm -rf $(FW_BUILD_ROOT) $(FW_MEM) $(FW_HEX)
+	rm -rf $(FW_BUILD_ROOT) $(FW_MEM) $(FW_HEX) $(FW_ROOT_MEM)
 
 fw-info:
 	@echo "CROSS_COMPILE=$(CROSS_COMPILE)"

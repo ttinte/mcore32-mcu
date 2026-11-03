@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 //  Module   : control_unit
-//  Children : None
+//  Children : exception
 //
 //  Description:
 //     Multicycle control FSM for the RV32 core.
@@ -79,7 +79,7 @@ module control_unit (
         ST_IF_REQ,
         ST_IF_RESP,
         ST_ID,
-        ST_JALR_TARGET,
+        ST_TARGET,
         ST_EX,
         ST_LD,
         ST_ST,
@@ -95,7 +95,7 @@ module control_unit (
     logic [2:0] funct3;
     logic [6:0] funct7;
 
-    logic        take_branch;
+    logic        take_branch_q, take_branch_d;
     logic [31:0] branch_target;
 
     logic fetch_fault;
@@ -179,6 +179,8 @@ module control_unit (
                 state_d = ST_EX;
 
                 if (is_branch) begin
+                    state_d = ST_TARGET;
+
                     ctrl_o.imm_sel    = IMM_B;
                     ctrl_o.op_a_sel   = OP_A_OLD_PC;
                     ctrl_o.op_b_sel   = OP_B_IMM;
@@ -204,7 +206,7 @@ module control_unit (
                 end
 
                 if (is_jalr) begin
-                    state_d = ST_JALR_TARGET;
+                    state_d = ST_TARGET;
                 end
 
                 if (is_jal) begin
@@ -221,13 +223,22 @@ module control_unit (
                 end
             end
 
-            ST_JALR_TARGET: begin
+            ST_TARGET: begin
                 state_d = ST_EX;
 
-                ctrl_o.imm_sel    = IMM_I;
-                ctrl_o.op_a_sel   = OP_A_RS1;
-                ctrl_o.op_b_sel   = OP_B_IMM;
-                ctrl_o.alu_out_we = 1'b1;
+                if (is_branch) begin
+                    ctrl_o.op_a_sel   = OP_A_RS1;
+                    ctrl_o.op_b_sel   = OP_B_RS2;
+                    ctrl_o.alu_op     = ALU_SUB;
+                end
+
+                if (is_jalr) begin
+                    ctrl_o.imm_sel    = IMM_I;
+                    ctrl_o.op_a_sel   = OP_A_RS1;
+                    ctrl_o.op_b_sel   = OP_B_IMM;
+                    ctrl_o.alu_out_we = 1'b1;
+                end
+                
             end
 
             ST_EX: begin
@@ -301,11 +312,7 @@ module control_unit (
 
                 else if (is_branch) begin
                     state_d = ST_IF_REQ;
-
-                    ctrl_o.pc_we      = take_branch;
-                    ctrl_o.op_a_sel   = OP_A_RS1;
-                    ctrl_o.op_b_sel   = OP_B_RS2;
-                    ctrl_o.alu_op     = ALU_SUB;
+                    ctrl_o.pc_we = take_branch_q;
                 end
 
                 else if (is_jalr) begin
@@ -331,7 +338,7 @@ module control_unit (
             ST_LD: begin
                 state_d = mem_ready_i ? ST_WB : ST_LD;
 
-                mem_valid_o = 1'b1;
+                mem_valid_o = !data_misaligned;
                 ctrl_o.mem_addr_sel = MEM_ADDR_RESULT;
 
                 unique case (funct3)
@@ -347,9 +354,9 @@ module control_unit (
             ST_ST: begin
                 state_d = mem_ready_i ? ST_IF_REQ : ST_ST;
 
-                mem_valid_o = 1'b1;
+                mem_valid_o = !data_misaligned;
                 ctrl_o.mem_addr_sel = MEM_ADDR_RESULT;
-                ctrl_o.mem_we = 1'b1;
+                ctrl_o.mem_we = !data_misaligned;
 
                 unique case(funct3)
                     FUNCT3_SB: ctrl_o.store_op = STORE_BYTE;
@@ -408,23 +415,21 @@ module control_unit (
             ctrl_o.pc_we  = 1'b0;
             ctrl_o.ir_we  = 1'b0;
             ctrl_o.reg_we = 1'b0;
-            mem_valid_o   = 1'b0;
-            ctrl_o.mem_we = 1'b0;
         end
     end
 
     // Branch condition decode
     always_comb begin
-        take_branch = 1'b0;
+        take_branch_d = 1'b0;
 
         if (is_branch) begin
             unique case (funct3)
-                FUNCT3_BEQ:  take_branch = flags_i.zero;
-                FUNCT3_BNE:  take_branch = ~flags_i.zero;
-                FUNCT3_BLT:  take_branch = (flags_i.sign ^ flags_i.overflow);
-                FUNCT3_BGE:  take_branch = ~(flags_i.sign ^ flags_i.overflow);
-                FUNCT3_BLTU: take_branch = ~flags_i.carry;
-                FUNCT3_BGEU: take_branch = flags_i.carry;
+                FUNCT3_BEQ:  take_branch_d = flags_i.zero;
+                FUNCT3_BNE:  take_branch_d = ~flags_i.zero;
+                FUNCT3_BLT:  take_branch_d = (flags_i.sign ^ flags_i.overflow);
+                FUNCT3_BGE:  take_branch_d = ~(flags_i.sign ^ flags_i.overflow);
+                FUNCT3_BLTU: take_branch_d = ~flags_i.carry;
+                FUNCT3_BGEU: take_branch_d = flags_i.carry;
                 default: ;
             endcase
         end
@@ -433,9 +438,11 @@ module control_unit (
     always_ff @(posedge clk_i) begin
         if (!rst_ni) begin
             state_q <= ST_IF_REQ;
+            take_branch_q <= 1'b0;
             trap_o  <= '0;
         end else begin
             state_q <= state_d;
+            take_branch_q <= take_branch_d;
             trap_o  <= exc_d;
         end
     end
@@ -537,7 +544,7 @@ module control_unit (
             end
         end
         
-        if ((state_q == ST_EX) && ((is_branch && take_branch) || is_jalr || is_jal)) begin
+        if ((state_q == ST_EX) && ((is_branch && take_branch_q) || is_jalr || is_jal)) begin
             addr_misaligned = is_jalr ? alu_result_i[1] : |alu_result_i[1:0];
         end
 
@@ -570,7 +577,7 @@ module control_unit (
     );
 
     assign trace_valid_o = ((state_q == ST_ST) && mem_valid_o && mem_ready_i && !mem_error_i) ||
-                           ((state_q == ST_EX) && is_branch && !(take_branch && addr_misaligned)) ||
+                           ((state_q == ST_EX) && is_branch && !(take_branch_q && addr_misaligned)) ||
                            (state_q == ST_WB || (state_q == ST_MRET));
 
 endmodule

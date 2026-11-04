@@ -19,7 +19,7 @@ FW_OBJDUMP := $(CROSS_COMPILE)objdump
 FW_SIZE    := $(CROSS_COMPILE)size
 
 # ===== FIRMWARE APPLICATION CONFIG =====
-APP ?= uart_trap
+APP ?= core_tests
 
 FW_DIR            := firmware
 FW_SOURCE_ROOT    := $(FW_DIR)/src
@@ -36,7 +36,6 @@ FW_APP_MEM        := $(FW_BUILD_DIR)/firmware.mem
 FW_APP_HEX        := $(FW_BUILD_DIR)/firmware.hex
 FW_MEM            := $(FW_DIR)/firmware.mem
 FW_HEX            := $(FW_DIR)/firmware.hex
-FW_ROOT_MEM       := firmware.mem
 FW_APP_SOURCES    := $(wildcard $(FW_APP_DIR)/*.c)
 FW_APP_ASM_SOURCES := $(wildcard $(FW_APP_DIR)/*.S)
 FW_PLATFORM_C_SOURCES := $(wildcard $(FW_PLATFORM_DIR)/*.c)
@@ -158,17 +157,16 @@ $(FW_DUMP): $(FW_ELF)
 
 fw: fw-tools $(FW_APP_MEM) $(FW_APP_HEX) $(FW_DUMP)
 	cp $(FW_APP_MEM) $(FW_MEM)
-	cp $(FW_APP_MEM) $(FW_ROOT_MEM)
 	cp $(FW_APP_HEX) $(FW_HEX)
 	@echo "Selected firmware app: $(APP)"
-	@echo "Vivado image: $(FW_ROOT_MEM)"
+	@echo "Vivado image: $(FW_MEM)"
 
 fw-rebuild:
 	rm -rf $(FW_BUILD_DIR)
 	$(MAKE) fw APP=$(APP)
 
 fw-clean:
-	rm -rf $(FW_BUILD_ROOT) $(FW_MEM) $(FW_HEX) $(FW_ROOT_MEM)
+	rm -rf $(FW_BUILD_ROOT) $(FW_MEM) $(FW_HEX)
 
 fw-info:
 	@echo "CROSS_COMPILE=$(CROSS_COMPILE)"

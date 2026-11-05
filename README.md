@@ -4,20 +4,14 @@ An educational softcore RISC-V microcontroller for FPGA, written in SystemVerilo
 
 ## Current features
 
-- Multicycle RV32I subset core with memory handshake and byte/halfword/word loads and stores.
-- Registered branch decisions and alignment-based memory request gating.
-- Machine-mode CSRs: `mstatus`, `mtvec`, `mepc`, `mcause`, `mtval`; six CSR instructions and `MRET`.
-- Synchronous exceptions for illegal instructions, misaligned addresses and access faults.
-- The CPU core does not support interrupts yet.
-- CPU trap-event and instruction-retirement debug outputs.
-- 32 KiB synchronous RAM with byte write enables and firmware initialization.
-- APB bridge/interconnect with address decoding and unmapped-access errors.
-- APB UART with 8N1 TX/RX, independent FIFOs and a polling C driver.
-  SoC defaults: 70 MHz, 115200 baud and 32-byte FIFOs per direction.
+- 32-bit multicycle RISC-V core implementing an RV32I subset.
+- Machine-mode CSRs and synchronous traps with `MRET`; interrupts are not supported.
+- 32 KiB synchronous RAM with byte writes and firmware initialization.
+- APB peripherals: UART, timer, I2C and GPIO.
 
 ## CPU datapath
 
-![Multicycle RV32 CPU datapath](docs/mcore_datapath.png)
+![Multicycle RV32 CPU datapath](docs/main_datapath.png)
 
 Main datapath; CSR and exception/trap logic omitted.
 
@@ -36,6 +30,8 @@ The APB window reserves address space, not physical RAM.
 | TX | `0x00` | Write | Transmit byte in bits `[7:0]` |
 | RX | `0x04` | Read | Receive byte in bits `[7:0]` |
 | STATUS | `0x08` | Read | Bit 0: TX full; bit 1: RX empty |
+
+UART defaults: 70 MHz clock, 115200 baud and 32-byte FIFOs per direction.
 
 ## Simulation
 

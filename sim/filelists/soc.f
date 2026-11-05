@@ -24,6 +24,18 @@ rtl/peripherals/uart/uart_rx.sv
 rtl/peripherals/uart/uart_wrapper.sv
 rtl/peripherals/uart/apb_uart.sv
 
+# ===== Timer =====
+rtl/peripherals/timer/timer.sv
+rtl/peripherals/timer/apb_timer.sv
+
+# ===== I2C =====
+rtl/peripherals/i2c/i2c_master.sv
+rtl/peripherals/i2c/apb_i2c.sv
+
+# ===== GPIO =====
+rtl/peripherals/gpio/gpio.sv
+rtl/peripherals/gpio/apb_gpio.sv
+
 # ===== SoC integration =====
 rtl/soc/apb_subsystem.sv
 rtl/soc/addr_decoder.sv

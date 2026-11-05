@@ -5,12 +5,27 @@ module soc_top #(
     parameter string       INIT_FILE  = "",
     parameter int unsigned CLOCK_RATE = 70_000_000,
     parameter int unsigned BAUD_RATE  = 115_200,
-    parameter int unsigned FIFO_DEPTH = 32
+    parameter int unsigned FIFO_DEPTH = 32,
+    parameter int unsigned I2C_RATE   = 100_000,
+    parameter int unsigned GPIO_WIDTH = 32
 ) (
     input  logic clk_i,
     input  logic rst_ni,
+
     input  logic rxd_i,
-    output logic txd_o
+    output logic txd_o,
+
+    input  logic scl_i,
+    input  logic sda_i,
+    output logic scl_drive_low_o,
+    output logic sda_drive_low_o,
+
+    input  logic [GPIO_WIDTH-1:0] gpio_i,
+    output logic [GPIO_WIDTH-1:0] gpio_o,
+    output logic [GPIO_WIDTH-1:0] gpio_oe_o,
+
+    // One-cycle event; cause/epc/tval are valid when .valid is asserted.
+    output rv32_pkg::exception_t cpu_trap_o
 );
 
     initial begin : check_soc
@@ -68,7 +83,7 @@ module soc_top #(
         .mem_wdata_o        (bus_wdata),
         .mem_wstrb_o        (bus_wstrb),
         .mem_rdata_i        (bus_rdata),
-        .trap_o             (),
+        .trap_o             (cpu_trap_o),
         .trace_valid_o      (),
         .trace_pc_o         (),
         .trace_instr_o      (),
@@ -117,7 +132,9 @@ module soc_top #(
     apb_subsystem #(
         .CLOCK_RATE         (CLOCK_RATE),
         .BAUD_RATE          (BAUD_RATE),
-        .FIFO_DEPTH         (FIFO_DEPTH)
+        .FIFO_DEPTH         (FIFO_DEPTH),
+        .I2C_RATE           (I2C_RATE),
+        .GPIO_WIDTH         (GPIO_WIDTH)
     ) u_apb_subsystem (
         .clk_i              (clk_i),
         .rst_ni             (rst_ni),
@@ -130,7 +147,14 @@ module soc_top #(
         .wstrb_i            (bus_wstrb),
         .rdata_o            (apb_rdata),
         .rxd_i              (rxd_i),
-        .txd_o              (txd_o)
+        .txd_o              (txd_o),
+        .scl_i              (scl_i),
+        .sda_i              (sda_i),
+        .scl_drive_low_o    (scl_drive_low_o),
+        .sda_drive_low_o    (sda_drive_low_o),
+        .gpio_i             (gpio_i),
+        .gpio_o             (gpio_o),
+        .gpio_oe_o          (gpio_oe_o)
     );
 
 endmodule

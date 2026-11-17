@@ -30,14 +30,14 @@ module ebaz4205_top #(
     input  logic        uart_rx_pin_i,
     output logic        uart_tx_pin_o,
 
-    input  logic        pir_i,
+    inout  wire         dht_io,
     inout  wire         i2c_scl_io,
     inout  wire         i2c_sda_io,
 
-    input  logic [4:0]  key_n_i,
+    input  logic        key5_n_i,
     output logic        buzzer_o,
 
-    output logic [2:0]  carrier_led_o,
+    output logic        carrier_led_o,
 
     output logic        led_green_no,
     output logic        led_red_no
@@ -49,7 +49,7 @@ module ebaz4205_top #(
 
     localparam int unsigned GPIO_WIDTH = 32;
     localparam int unsigned GPIO_BUZZER_GATE_BIT = 11;
-    localparam int unsigned GPIO_CARRIER_LED_BIT = 8;
+    localparam int unsigned GPIO_BUZZER_LED_BIT = 9;
     localparam int unsigned BUZZER_HALF_CYCLES = CLOCK_RATE / 4000;
     localparam int unsigned BUZZER_COUNT_WIDTH =
         BUZZER_HALF_CYCLES > 1 ? $clog2(BUZZER_HALF_CYCLES) : 1;
@@ -58,10 +58,9 @@ module ebaz4205_top #(
     logic [GPIO_WIDTH-1:0] gpio_o;
     logic [GPIO_WIDTH-1:0] gpio_oe;
     logic [25:0]           pl_heartbeat_q;
-    rv32_pkg::exception_t  cpu_trap;
-    logic                  trap_seen_q;
     logic                  scl_drive_low;
     logic                  sda_drive_low;
+    logic                  dht_drive_low;
     logic [BUZZER_COUNT_WIDTH-1:0] buzzer_count_q;
     logic                  buzzer_tone_q;
 
@@ -70,9 +69,10 @@ module ebaz4205_top #(
             $fatal(1, "CLOCK_RATE must be at least 4000 Hz for the buzzer");
     end
 
-    assign gpio_i = {{(GPIO_WIDTH-6){1'b0}}, pir_i, key_n_i};
+    assign gpio_i = {{(GPIO_WIDTH-1){1'b0}}, key5_n_i};
     assign i2c_scl_io = scl_drive_low ? 1'b0 : 1'bz;
     assign i2c_sda_io = sda_drive_low ? 1'b0 : 1'bz;
+    assign dht_io = dht_drive_low ? 1'b0 : 1'bz;
 
     ps7_fclk_wrapper u_ps7_fclk_wrapper (
         .DDR_addr           (DDR_addr),
@@ -118,10 +118,12 @@ module ebaz4205_top #(
         .sda_i              (i2c_sda_io),
         .scl_drive_low_o    (scl_drive_low),
         .sda_drive_low_o    (sda_drive_low),
+        .dht_i              (dht_io),
+        .dht_drive_low_o    (dht_drive_low),
         .gpio_i             (gpio_i),
         .gpio_o             (gpio_o),
         .gpio_oe_o          (gpio_oe),
-        .cpu_trap_o         (cpu_trap)
+        .cpu_trap_o         ()
     );
 
     always_ff @(posedge pl_clk or negedge soc_rst_n) begin
@@ -132,13 +134,8 @@ module ebaz4205_top #(
         end
     end
 
-    always_ff @(posedge pl_clk or negedge soc_rst_n) begin
-        if (!soc_rst_n) trap_seen_q <= 1'b0;
-        else if (cpu_trap.valid) trap_seen_q <= 1'b1;
-    end
-
     assign led_green_no = ~pl_heartbeat_q[25];
-    assign led_red_no   = soc_rst_n && (&key_n_i) && !trap_seen_q;
+    assign led_red_no   = soc_rst_n;
 
     always_ff @(posedge pl_clk or negedge soc_rst_n) begin
         if (!soc_rst_n) begin
@@ -158,7 +155,7 @@ module ebaz4205_top #(
 
     assign buzzer_o = gpio_oe[GPIO_BUZZER_GATE_BIT] &&
                       gpio_o[GPIO_BUZZER_GATE_BIT] && buzzer_tone_q;
-    assign carrier_led_o = gpio_o[GPIO_CARRIER_LED_BIT +: 3] &
-                           gpio_oe[GPIO_CARRIER_LED_BIT +: 3];
+    assign carrier_led_o = gpio_o[GPIO_BUZZER_LED_BIT] &
+                           gpio_oe[GPIO_BUZZER_LED_BIT];
 
 endmodule

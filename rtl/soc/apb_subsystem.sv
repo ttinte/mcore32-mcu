@@ -1,6 +1,7 @@
 //-----------------------------------------------------------------------------
 //  Module   : apb_subsystem
-//  Children : apb_master, apb_interconnect, apb_uart, apb_timer, apb_i2c, apb_gpio
+//  Children : apb_master, apb_interconnect, apb_uart, apb_timer, apb_i2c,
+//             apb_gpio, apb_dht22
 //
 //  Description:
 //     Connects CPU requests to APB peripherals.
@@ -36,6 +37,9 @@ module apb_subsystem #(
     input  logic           sda_i,
     output logic           scl_drive_low_o,
     output logic           sda_drive_low_o,
+
+    input  logic           dht_i,
+    output logic           dht_drive_low_o,
 
     input  logic [GPIO_WIDTH-1:0] gpio_i,
     output logic [GPIO_WIDTH-1:0] gpio_o,
@@ -111,6 +115,16 @@ module apb_subsystem #(
         .gpio_oe_o          (gpio_oe_o),
         .irq_o              (),
         .cpl                (apb_peripherals_bus[apb_addr_map_pkg::GPIO_IDX])
+    );
+
+    apb_dht22 #(
+        .CLOCK_RATE         (CLOCK_RATE)
+    ) u_apb_dht22 (
+        .clk_i              (clk_i),
+        .rst_ni             (rst_ni),
+        .dht_i              (dht_i),
+        .dht_drive_low_o    (dht_drive_low_o),
+        .cpl                (apb_peripherals_bus[apb_addr_map_pkg::DHT22_IDX])
     );
 
 endmodule

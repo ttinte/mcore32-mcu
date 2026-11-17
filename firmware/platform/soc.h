@@ -11,6 +11,7 @@
 #define TIMER_BASE      0x80001000u
 #define I2C_BASE        0x80002000u
 #define GPIO_BASE       0x80003000u
+#define DHT22_BASE      0x80004000u
 #define CLOCK_HZ        70000000u
 #define UART_BAUD_RATE  115200u
 

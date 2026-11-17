@@ -36,6 +36,10 @@ rtl/peripherals/i2c/apb_i2c.sv
 rtl/peripherals/gpio/gpio.sv
 rtl/peripherals/gpio/apb_gpio.sv
 
+# ===== DHT22 =====
+rtl/peripherals/dht22/dht22_master.sv
+rtl/peripherals/dht22/apb_dht22.sv
+
 # ===== SoC integration =====
 rtl/soc/apb_subsystem.sv
 rtl/soc/addr_decoder.sv

@@ -20,6 +20,9 @@ module soc_top #(
     output logic scl_drive_low_o,
     output logic sda_drive_low_o,
 
+    input  logic dht_i,
+    output logic dht_drive_low_o,
+
     input  logic [GPIO_WIDTH-1:0] gpio_i,
     output logic [GPIO_WIDTH-1:0] gpio_o,
     output logic [GPIO_WIDTH-1:0] gpio_oe_o,
@@ -152,6 +155,8 @@ module soc_top #(
         .sda_i              (sda_i),
         .scl_drive_low_o    (scl_drive_low_o),
         .sda_drive_low_o    (sda_drive_low_o),
+        .dht_i              (dht_i),
+        .dht_drive_low_o    (dht_drive_low_o),
         .gpio_i             (gpio_i),
         .gpio_o             (gpio_o),
         .gpio_oe_o          (gpio_oe_o)

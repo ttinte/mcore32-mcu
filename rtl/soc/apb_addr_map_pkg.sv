@@ -1,5 +1,6 @@
 //-----------------------------------------------------------------------------
-//  Packages : apb_addr_map_pkg, uart_reg_pkg, timer_reg_pkg, i2c_reg_pkg, gpio_reg_pkg
+//  Packages : apb_addr_map_pkg, uart_reg_pkg, timer_reg_pkg, i2c_reg_pkg,
+//              gpio_reg_pkg, dht22_reg_pkg
 //
 //  Description:
 //     Shared peripherals address map and register offsets.
@@ -16,13 +17,15 @@ package apb_addr_map_pkg;
     localparam int unsigned TIMER0_IDX = 1;
     localparam int unsigned I2C0_IDX   = 2;
     localparam int unsigned GPIO_IDX   = 3;
-    localparam int unsigned NUM_SLAVES = 4;
+    localparam int unsigned DHT22_IDX  = 4;
+    localparam int unsigned NUM_SLAVES = 5;
 
     localparam apb_pkg::addr_t PERIPH_BASE_ADDR [NUM_SLAVES] = '{
         UART0_IDX:  32'h8000_0000,
         TIMER0_IDX: 32'h8000_1000,
         I2C0_IDX:   32'h8000_2000,
-        GPIO_IDX:   32'h8000_3000
+        GPIO_IDX:   32'h8000_3000,
+        DHT22_IDX:  32'h8000_4000
     };
 
 endpackage
@@ -65,5 +68,14 @@ package gpio_reg_pkg;
     localparam logic [11:0] IRQ_RISE_ENABLE_OFFSET = 12'h00c;
     localparam logic [11:0] IRQ_FALL_ENABLE_OFFSET = 12'h010;
     localparam logic [11:0] IRQ_STATUS_OFFSET      = 12'h014;
+
+endpackage
+
+package dht22_reg_pkg;
+
+    localparam logic [11:0] COMMAND_OFFSET     = 12'h000;
+    localparam logic [11:0] STATUS_OFFSET      = 12'h004;
+    localparam logic [11:0] TEMPERATURE_OFFSET = 12'h008;
+    localparam logic [11:0] HUMIDITY_OFFSET    = 12'h00c;
 
 endpackage

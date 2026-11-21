@@ -11,9 +11,9 @@
 #define HUMIDITY_HYSTERESIS      30u  /* 3.0 %RH */
 #define KEY_DEBOUNCE_MS          30u
 #define APP_SAMPLE_US            5000u
-#define BEEP_MS                  200u
-#define BEEP_GAP_MS              200u
-#define BEEP_COUNT               3u
+#define BEEP_MS                  500u
+#define BEEP_GAP_MS              1000u
+#define BEEP_COUNT               0u /* 0 = repeat continuously until the alarm clears */
 #define LCD_RETRY_INTERVAL_MS    5000u
 #define UART_POLL_BUDGET         16u
 

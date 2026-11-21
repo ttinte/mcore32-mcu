@@ -29,7 +29,7 @@ typedef struct {
 void env_monitor_init(env_monitor_t *state, uint32_t now);
 uint32_t env_monitor_set_limits(env_monitor_t *state, int32_t temperature_tenths,
                                 uint32_t humidity_tenths, uint32_t now);
-uint32_t env_monitor_set_buzzer(env_monitor_t *state, uint32_t enabled);
+uint32_t env_monitor_set_buzzer(env_monitor_t *state, uint32_t enabled, uint32_t now);
 uint32_t env_monitor_update_sample(env_monitor_t *state, int32_t temperature_tenths,
                                    uint32_t humidity_tenths, uint32_t now);
 uint32_t env_monitor_update_key(env_monitor_t *state, uint32_t now, uint32_t gpio);

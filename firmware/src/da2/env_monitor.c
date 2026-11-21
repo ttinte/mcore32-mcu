@@ -15,7 +15,7 @@ static uint32_t start_beep(env_monitor_t *state, uint32_t now)
 {
     if (state->buzzer_enabled == 0u || state->beep_pulses_left != 0u) return 0u;
     state->beep_active = 1u;
-    state->beep_pulses_left = BEEP_COUNT;
+    state->beep_pulses_left = BEEP_COUNT == 0u ? 1u : BEEP_COUNT;
     state->beep_started_ms = now;
     return ENV_BEEP_START;
 }
@@ -76,13 +76,17 @@ uint32_t env_monitor_set_limits(env_monitor_t *state, int32_t temperature_tenths
     return ENV_CHANGED | evaluate_alarm(state, now);
 }
 
-uint32_t env_monitor_set_buzzer(env_monitor_t *state, uint32_t enabled)
+uint32_t env_monitor_set_buzzer(env_monitor_t *state, uint32_t enabled, uint32_t now)
 {
     uint32_t events = 0u;
     enabled = enabled != 0u;
     if (state->buzzer_enabled == enabled) return 0u;
     state->buzzer_enabled = enabled;
-    if (enabled == 0u) events |= stop_beep(state);
+    if (enabled == 0u) {
+        events |= stop_beep(state);
+    } else if (state->alarm != 0u) {
+        events |= start_beep(state, now);
+    }
     return events | ENV_BUZZER_CHANGE;
 }
 
@@ -107,7 +111,7 @@ uint32_t env_monitor_update_key(env_monitor_t *state, uint32_t now, uint32_t gpi
         const uint32_t pressed = key_pressed && !state->key_stable;
         state->key_stable = key_pressed;
         if (pressed != 0u)
-            events |= env_monitor_set_buzzer(state, !state->buzzer_enabled);
+            events |= env_monitor_set_buzzer(state, !state->buzzer_enabled, now);
     }
     return events;
 }
@@ -121,6 +125,7 @@ uint32_t env_monitor_tick(env_monitor_t *state, uint32_t now)
     state->beep_started_ms = now;
     if (state->beep_active != 0u) {
         state->beep_active = 0u;
+        if (BEEP_COUNT == 0u) return ENV_CHANGED;
         --state->beep_pulses_left;
         return state->beep_pulses_left == 0u ? ENV_BEEP_STOP : ENV_CHANGED;
     }

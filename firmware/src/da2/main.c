@@ -209,7 +209,7 @@ static void execute(console_command_t command)
         break;
     case CONSOLE_BUZZER_ON:
     case CONSOLE_BUZZER_OFF:
-        events = env_monitor_set_buzzer(&monitor, command == CONSOLE_BUZZER_ON);
+        events = env_monitor_set_buzzer(&monitor, command == CONSOLE_BUZZER_ON, timebase_ms());
         print(monitor.buzzer_enabled != 0u ? "OK buzzer on\r\n" : "OK buzzer off\r\n");
         break;
     case CONSOLE_LIGHT_ON:
